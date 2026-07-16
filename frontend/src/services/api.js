@@ -1,8 +1,12 @@
 import axios from "axios";
 import { clearAdminAuth, getAdminToken } from "./auth";
 
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ||
+  "https://barani-siddha-varma-salai-website.onrender.com/api";
+
 const api = axios.create({
-  baseURL: "/api",
+  baseURL: API_BASE_URL,
   headers: {
     "Content-Type": "application/json",
   },
