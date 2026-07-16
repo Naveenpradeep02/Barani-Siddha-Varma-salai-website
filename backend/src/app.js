@@ -8,9 +8,15 @@ const { errorHandler, notFound } = require("./middleware/errorMiddleware");
 
 const app = express();
 const isProduction = NODE_ENV === "production";
-const allowedOrigins = CORS_ORIGIN.split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
+const defaultDevOrigins = ["http://localhost:3000", "http://127.0.0.1:3000"];
+const allowedOrigins = Array.from(
+  new Set(
+    CORS_ORIGIN.split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean)
+      .concat(defaultDevOrigins),
+  ),
+);
 
 if (isProduction) {
   app.set("trust proxy", 1);
@@ -32,7 +38,9 @@ app.use(
         return callback(null, true);
       }
 
-      return callback(new Error("Not allowed by CORS"));
+      const error = new Error(`Origin ${origin} is not allowed by CORS`);
+      error.statusCode = 403;
+      return callback(error);
     },
     credentials: false,
   }),
