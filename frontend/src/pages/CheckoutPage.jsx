@@ -112,6 +112,7 @@ function CheckoutPage() {
         customerId: CUSTOMER_ID,
         shippingAddress,
         billingAddress,
+        customerName: formData.fullName,
         customerPhone: formData.phone,
         customerEmail: formData.email,
         taxAmount: tax,

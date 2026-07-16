@@ -1,6 +1,6 @@
 const pool = require("../config/db");
 const { v4: uuidv4 } = require("uuid");
-const { ensureGuestCustomer } = require("../utils/guestCustomer");
+const { ensureCheckoutCustomer } = require("../utils/guestCustomer");
 
 async function createOrder(req, res, next) {
   const connection = await pool.getConnection();
@@ -9,6 +9,7 @@ async function createOrder(req, res, next) {
       customerId = 1,
       shippingAddress,
       billingAddress,
+      customerName,
       customerPhone,
       customerEmail,
       items,
@@ -23,7 +24,12 @@ async function createOrder(req, res, next) {
       return next(new Error("No order items provided"));
     }
 
-    await ensureGuestCustomer(customerId);
+    const checkoutCustomerId = await ensureCheckoutCustomer({
+      customerId,
+      customerName,
+      customerEmail,
+      customerPhone,
+    });
 
     const subtotal = items.reduce(
       (sum, item) => sum + item.price * item.quantity,
@@ -43,7 +49,7 @@ async function createOrder(req, res, next) {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'pending', ?)`,
       [
         orderNumber,
-        customerId,
+        checkoutCustomerId,
         shippingAddress,
         billingAddress,
         customerPhone,

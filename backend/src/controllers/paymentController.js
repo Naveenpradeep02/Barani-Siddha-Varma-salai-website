@@ -24,20 +24,6 @@ function assertPaymentConfig() {
     error.statusCode = 500;
     throw error;
   }
-
-  const isLiveEndpoint = INSTAMOJO_ENDPOINT.includes("www.instamojo.com");
-  const isLocalCallback =
-    BACKEND_URL.includes("localhost") ||
-    BACKEND_URL.includes("127.0.0.1") ||
-    BACKEND_URL.includes("::1");
-
-  if (isLiveEndpoint && isLocalCallback) {
-    const error = new Error(
-      "Instamojo live payments need a public BACKEND_URL for redirects. Use the test Instamojo endpoint for local development, or set BACKEND_URL to your deployed HTTPS backend URL.",
-    );
-    error.statusCode = 400;
-    throw error;
-  }
 }
 
 function normalizePhone(phone) {
