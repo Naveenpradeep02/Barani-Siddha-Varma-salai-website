@@ -18,6 +18,22 @@ function getPaymentUrl(paymentRequest) {
   );
 }
 
+function getInstamojoEndpoint() {
+  return String(INSTAMOJO_ENDPOINT || "").replace(/\/+$/, "");
+}
+
+function getInstamojoMode(endpoint = getInstamojoEndpoint()) {
+  if (endpoint.includes("test.instamojo.com")) {
+    return "test";
+  }
+
+  if (endpoint.includes("instamojo.com")) {
+    return "live";
+  }
+
+  return "unknown";
+}
+
 function assertPaymentConfig() {
   if (!INSTAMOJO_API_KEY || !INSTAMOJO_AUTH_TOKEN || !INSTAMOJO_ENDPOINT) {
     const error = new Error("Instamojo payment credentials are not configured");
@@ -42,18 +58,41 @@ function handleInstamojoError(error) {
     return error;
   }
 
+  const gatewayStatus = error.response.status;
+  const gatewayResponse = error.response.data;
   const providerMessage =
-    error.response.data?.message ||
-    error.response.data?.error ||
-    error.response.data?.detail;
+    gatewayResponse?.message || gatewayResponse?.error || gatewayResponse?.detail;
   const message =
-    error.response.status === 403
+    gatewayStatus === 403
       ? "Payment gateway rejected the request. Check that INSTAMOJO_ENDPOINT matches your Instamojo key/token mode, and that the key/token are active."
       : providerMessage || "Payment gateway request failed";
 
   const gatewayError = new Error(message);
   gatewayError.statusCode = 502;
+  gatewayError.details = {
+    gatewayStatus,
+    gatewayResponse,
+    instamojoEndpoint: getInstamojoEndpoint(),
+    instamojoMode: getInstamojoMode(),
+  };
   return gatewayError;
+}
+
+function getPaymentConfig(req, res, next) {
+  try {
+    const endpoint = getInstamojoEndpoint();
+    res.json({
+      backendUrl: BACKEND_URL,
+      frontendUrl: FRONTEND_URL,
+      redirectUrl: `${BACKEND_URL}/api/payments/verify`,
+      instamojoEndpoint: endpoint || null,
+      instamojoMode: getInstamojoMode(endpoint),
+      hasInstamojoApiKey: Boolean(INSTAMOJO_API_KEY),
+      hasInstamojoAuthToken: Boolean(INSTAMOJO_AUTH_TOKEN),
+    });
+  } catch (error) {
+    next(error);
+  }
 }
 
 async function createPaymentRequest(req, res, next) {
@@ -108,7 +147,7 @@ async function createPaymentRequest(req, res, next) {
     };
 
     const response = await axios.post(
-      `${INSTAMOJO_ENDPOINT}/payment-requests/`,
+      `${getInstamojoEndpoint()}/payment-requests/`,
       toInstamojoPayload(payload),
       {
         headers: {
@@ -150,7 +189,7 @@ async function verifyPayment(req, res, next) {
     }
 
     const response = await axios.get(
-      `${INSTAMOJO_ENDPOINT}/payment-requests/${payment_request_id}/`,
+      `${getInstamojoEndpoint()}/payment-requests/${payment_request_id}/`,
       {
         headers: {
           "X-Api-Key": INSTAMOJO_API_KEY,
@@ -205,4 +244,4 @@ async function verifyPayment(req, res, next) {
   }
 }
 
-module.exports = { createPaymentRequest, verifyPayment };
+module.exports = { createPaymentRequest, getPaymentConfig, verifyPayment };
