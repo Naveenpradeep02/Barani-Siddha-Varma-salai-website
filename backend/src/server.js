@@ -1,6 +1,7 @@
 const app = require("./app");
 const pool = require("./config/db");
 const { PORT } = require("./config/appConfig");
+const { ensureConfiguredAdmin } = require("./utils/adminAccount");
 
 async function startServer() {
   try {
@@ -8,6 +9,7 @@ async function startServer() {
     await connection.ping();
     connection.release();
     console.log("Database connected successfully.");
+    await ensureConfiguredAdmin();
   } catch (error) {
     console.error("Database connection failed:", error.message);
     process.exit(1);

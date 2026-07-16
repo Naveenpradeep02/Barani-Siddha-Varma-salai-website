@@ -39,4 +39,5 @@ module.exports = {
   ADMIN_PASSWORD: process.env.ADMIN_PASSWORD,
   ADMIN_NAME: process.env.ADMIN_NAME,
   ADMIN_ROLE: process.env.ADMIN_ROLE || "admin",
+  ADMIN_RESET_PASSWORD: process.env.ADMIN_RESET_PASSWORD === "true",
 };
