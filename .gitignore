@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+
+node_modules/
+dist/
+build/
+
+*.log
+*.err.log
+
+backend/src/uploads/
+backend/uploads/
+frontend/vite-dev*.log
