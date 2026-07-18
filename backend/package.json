@@ -1,7 +1,7 @@
 {
   "name": "d-grow-ecom-backend",
   "version": "1.0.0",
-  "description": "Backend for D-Grow eCommerce platform with Express, MySQL, JWT, Instamojo, Shiprocket, Cloudinary",
+  "description": "Backend for D-Grow eCommerce platform with Express, MySQL, JWT, Cashfree, Shiprocket, Cloudinary",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",

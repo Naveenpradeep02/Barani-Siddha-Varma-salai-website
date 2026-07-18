@@ -22,6 +22,40 @@ function getItemPrice(item) {
   return Number(item.discount_price || item.price || 0);
 }
 
+function loadCashfreeSdk() {
+  return new Promise((resolve, reject) => {
+    if (window.Cashfree) {
+      resolve(window.Cashfree);
+      return;
+    }
+
+    const existingScript = document.querySelector(
+      'script[src="https://sdk.cashfree.com/js/v3/cashfree.js"]',
+    );
+    if (existingScript) {
+      existingScript.addEventListener("load", () => resolve(window.Cashfree));
+      existingScript.addEventListener("error", reject);
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://sdk.cashfree.com/js/v3/cashfree.js";
+    script.async = true;
+    script.onload = () => resolve(window.Cashfree);
+    script.onerror = reject;
+    document.body.appendChild(script);
+  });
+}
+
+async function openCashfreeCheckout(paymentSessionId, mode) {
+  const Cashfree = await loadCashfreeSdk();
+  const cashfree = Cashfree({ mode });
+  await cashfree.checkout({
+    paymentSessionId,
+    redirectTarget: "_self",
+  });
+}
+
 function CheckoutPage() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -140,6 +174,15 @@ function CheckoutPage() {
       await Promise.all(
         items.map((item) => storefrontApi.removeCartItem(item.id)),
       );
+      const paymentSessionId = paymentResponse.data.paymentSessionId;
+      if (paymentSessionId) {
+        await openCashfreeCheckout(
+          paymentSessionId,
+          paymentResponse.data.cashfreeMode || "sandbox",
+        );
+        return;
+      }
+
       const paymentUrl = paymentResponse.data.paymentUrl;
       if (paymentUrl) {
         window.location.assign(paymentUrl);

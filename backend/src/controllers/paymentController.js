@@ -2,125 +2,63 @@ const axios = require("axios");
 const pool = require("../config/db");
 const {
   BACKEND_URL,
+  CASHFREE_API_VERSION,
+  CASHFREE_CLIENT_ID,
+  CASHFREE_CLIENT_SECRET,
+  CASHFREE_ENDPOINT,
+  CASHFREE_ENV,
   FRONTEND_URL,
-  INSTAMOJO_API_KEY,
-  INSTAMOJO_API_VERSION,
-  INSTAMOJO_AUTH_TOKEN,
-  INSTAMOJO_AUTH_ENDPOINT,
-  INSTAMOJO_CLIENT_ID,
-  INSTAMOJO_CLIENT_SECRET,
-  INSTAMOJO_ENDPOINT,
 } = require("../config/appConfig");
 
-let cachedAccessToken = null;
-let cachedAccessTokenExpiresAt = 0;
-
-function getPaymentUrl(paymentRequest) {
-  return (
-    paymentRequest?.longurl ||
-    paymentRequest?.long_url ||
-    paymentRequest?.shorturl ||
-    paymentRequest?.short_url ||
-    paymentRequest?.payment_url ||
-    paymentRequest?.url ||
-    null
-  );
-}
-
-function getPaymentRequestId(paymentRequest) {
-  return paymentRequest?.id || paymentRequest?.payment_request_id || null;
-}
-
-function getConfiguredApiVersion() {
-  const configuredVersion = String(INSTAMOJO_API_VERSION || "").toLowerCase();
-  if (configuredVersion === "v1" || configuredVersion === "v1.1") {
-    return "v1.1";
-  }
-
-  if (configuredVersion === "v2") {
-    return "v2";
-  }
-
-  return INSTAMOJO_CLIENT_ID && INSTAMOJO_CLIENT_SECRET ? "v2" : "v1.1";
-}
-
-function getInstamojoEndpoint() {
-  const configuredEndpoint = String(INSTAMOJO_ENDPOINT || "").replace(/\/+$/, "");
+function getCashfreeEndpoint() {
+  const configuredEndpoint = String(CASHFREE_ENDPOINT || "").replace(/\/+$/, "");
   if (configuredEndpoint) {
     return configuredEndpoint;
   }
 
-  return getConfiguredApiVersion() === "v2"
-    ? "https://api.instamojo.com/v2"
-    : "";
+  return CASHFREE_ENV === "production"
+    ? "https://api.cashfree.com/pg"
+    : "https://sandbox.cashfree.com/pg";
 }
 
-function getInstamojoMode(endpoint = getInstamojoEndpoint()) {
-  if (endpoint.includes("test.instamojo.com")) {
-    return "test";
-  }
-
-  if (endpoint.includes("instamojo.com")) {
-    return "live";
-  }
-
-  return "unknown";
+function getCashfreeMode() {
+  return CASHFREE_ENV === "production" ? "production" : "sandbox";
 }
 
-function isValidInstamojoEndpoint(endpoint = getInstamojoEndpoint()) {
-  if (getConfiguredApiVersion() === "v2") {
-    return /^https:\/\/(api|test)\.instamojo\.com\/v2$/.test(endpoint);
-  }
-
-  return /^https:\/\/(www|test)\.instamojo\.com\/api\/1\.1$/.test(endpoint);
-}
-
-function getInstamojoAuthEndpoint() {
-  const configuredEndpoint = String(INSTAMOJO_AUTH_ENDPOINT || "").replace(/\/+$/, "");
-  if (configuredEndpoint) {
-    return `${configuredEndpoint}/`;
-  }
-
-  const apiEndpoint = getInstamojoEndpoint();
-  if (apiEndpoint.includes("test.instamojo.com")) {
-    return "https://test.instamojo.com/oauth2/token/";
-  }
-
-  return "https://api.instamojo.com/oauth2/token/";
+function isValidCashfreeEndpoint(endpoint = getCashfreeEndpoint()) {
+  return /^https:\/\/(api|sandbox)\.cashfree\.com\/pg$/.test(endpoint);
 }
 
 function assertPaymentConfig() {
-  const apiVersion = getConfiguredApiVersion();
-  const hasCredentials =
-    apiVersion === "v2"
-      ? INSTAMOJO_CLIENT_ID && INSTAMOJO_CLIENT_SECRET
-      : INSTAMOJO_API_KEY && INSTAMOJO_AUTH_TOKEN;
-
-  if (!hasCredentials || !getInstamojoEndpoint()) {
+  if (!CASHFREE_CLIENT_ID || !CASHFREE_CLIENT_SECRET) {
     const error = new Error(
-      apiVersion === "v2"
-        ? "Instamojo v2 credentials are not configured. Set INSTAMOJO_CLIENT_ID and INSTAMOJO_CLIENT_SECRET."
-        : "Instamojo v1.1 credentials are not configured. Set INSTAMOJO_API_KEY and INSTAMOJO_AUTH_TOKEN.",
+      "Cashfree credentials are not configured. Set CASHFREE_CLIENT_ID and CASHFREE_CLIENT_SECRET.",
     );
     error.statusCode = 500;
     throw error;
   }
 
-  const endpoint = getInstamojoEndpoint();
-  if (!isValidInstamojoEndpoint(endpoint)) {
+  const endpoint = getCashfreeEndpoint();
+  if (!isValidCashfreeEndpoint(endpoint)) {
     const error = new Error(
-      apiVersion === "v2"
-        ? "INSTAMOJO_ENDPOINT must be https://api.instamojo.com/v2 for live v2 credentials or https://test.instamojo.com/v2 for test v2 credentials"
-        : "INSTAMOJO_ENDPOINT must be https://www.instamojo.com/api/1.1 for live v1.1 keys or https://test.instamojo.com/api/1.1 for test v1.1 keys",
+      "CASHFREE_ENDPOINT must be https://api.cashfree.com/pg for production or https://sandbox.cashfree.com/pg for sandbox.",
     );
     error.statusCode = 500;
     error.details = {
-      instamojoApiVersion: apiVersion,
-      instamojoEndpoint: endpoint,
-      instamojoMode: getInstamojoMode(endpoint),
+      cashfreeEndpoint: endpoint,
+      cashfreeMode: getCashfreeMode(),
     };
     throw error;
   }
+}
+
+function getCashfreeHeaders() {
+  return {
+    "Content-Type": "application/json",
+    "x-api-version": CASHFREE_API_VERSION,
+    "x-client-id": CASHFREE_CLIENT_ID,
+    "x-client-secret": CASHFREE_CLIENT_SECRET,
+  };
 }
 
 function normalizePhone(phone) {
@@ -128,71 +66,15 @@ function normalizePhone(phone) {
   return digits.length > 10 ? digits.slice(-10) : digits;
 }
 
-function toInstamojoPayload(payload) {
-  return new URLSearchParams(
-    Object.entries(payload).map(([key, value]) => [key, String(value)]),
-  );
+function buildCashfreeOrderId(orderId) {
+  return `BSVS_${orderId}_${Date.now().toString(36)}`;
 }
 
-async function getInstamojoAccessToken() {
-  const now = Date.now();
-  if (cachedAccessToken && cachedAccessTokenExpiresAt > now) {
-    return cachedAccessToken;
-  }
-
-  const response = await axios.post(
-    getInstamojoAuthEndpoint(),
-    toInstamojoPayload({
-      grant_type: "client_credentials",
-      client_id: INSTAMOJO_CLIENT_ID,
-      client_secret: INSTAMOJO_CLIENT_SECRET,
-    }),
-    {
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-    },
-  );
-
-  cachedAccessToken = response.data.access_token;
-  cachedAccessTokenExpiresAt =
-    now + Math.max(Number(response.data.expires_in || 36000) - 60, 60) * 1000;
-  return cachedAccessToken;
+function isPaidCashfreeOrder(orderStatus) {
+  return String(orderStatus || "").toUpperCase() === "PAID";
 }
 
-async function getInstamojoHeaders() {
-  if (getConfiguredApiVersion() === "v2") {
-    const accessToken = await getInstamojoAccessToken();
-    return {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: `Bearer ${accessToken}`,
-    };
-  }
-
-  return {
-    "Content-Type": "application/x-www-form-urlencoded",
-    "X-Api-Key": INSTAMOJO_API_KEY,
-    "X-Auth-Token": INSTAMOJO_AUTH_TOKEN,
-  };
-}
-
-function getCreatePaymentRequestUrl() {
-  return getConfiguredApiVersion() === "v2"
-    ? `${getInstamojoEndpoint()}/payment_requests/`
-    : `${getInstamojoEndpoint()}/payment-requests/`;
-}
-
-function getPaymentRequestUrl(paymentRequestId) {
-  return getConfiguredApiVersion() === "v2"
-    ? `${getInstamojoEndpoint()}/payment_requests/${paymentRequestId}/`
-    : `${getInstamojoEndpoint()}/payment-requests/${paymentRequestId}/`;
-}
-
-function getPaymentRequestFromResponse(data) {
-  return data.payment_request || data;
-}
-
-function handleInstamojoError(error) {
+function handleCashfreeError(error) {
   if (!error.response) {
     return error;
   }
@@ -201,41 +83,37 @@ function handleInstamojoError(error) {
   const gatewayResponse = error.response.data;
   const providerMessage =
     gatewayResponse?.message || gatewayResponse?.error || gatewayResponse?.detail;
-  const message =
-    gatewayStatus === 403
-      ? "Payment gateway rejected the request. Check that your Instamojo endpoint matches the configured API version and credential mode, and that the credentials are active."
-      : providerMessage || "Payment gateway request failed";
+  const gatewayError = new Error(
+    providerMessage ||
+      "Cashfree rejected the payment request. Check your Cashfree credentials, mode, and endpoint.",
+  );
 
-  const gatewayError = new Error(message);
   gatewayError.statusCode = 502;
   gatewayError.details = {
     gatewayStatus,
     gatewayResponse,
-    instamojoApiVersion: getConfiguredApiVersion(),
-    instamojoEndpoint: getInstamojoEndpoint(),
-    instamojoMode: getInstamojoMode(),
+    cashfreeEndpoint: getCashfreeEndpoint(),
+    cashfreeMode: getCashfreeMode(),
+    cashfreeApiVersion: CASHFREE_API_VERSION,
   };
-  console.error("Instamojo request failed:", gatewayError.details);
+  console.error("Cashfree request failed:", gatewayError.details);
   return gatewayError;
 }
 
 function getPaymentConfig(req, res, next) {
   try {
-    const endpoint = getInstamojoEndpoint();
+    const endpoint = getCashfreeEndpoint();
     res.json({
+      gateway: "cashfree",
       backendUrl: BACKEND_URL,
       frontendUrl: FRONTEND_URL,
       redirectUrl: `${BACKEND_URL}/api/payments/verify`,
-      instamojoApiVersion: getConfiguredApiVersion(),
-      instamojoEndpoint: endpoint || null,
-      instamojoAuthEndpoint:
-        getConfiguredApiVersion() === "v2" ? getInstamojoAuthEndpoint() : null,
-      instamojoMode: getInstamojoMode(endpoint),
-      isValidInstamojoEndpoint: isValidInstamojoEndpoint(endpoint),
-      hasInstamojoApiKey: Boolean(INSTAMOJO_API_KEY),
-      hasInstamojoAuthToken: Boolean(INSTAMOJO_AUTH_TOKEN),
-      hasInstamojoClientId: Boolean(INSTAMOJO_CLIENT_ID),
-      hasInstamojoClientSecret: Boolean(INSTAMOJO_CLIENT_SECRET),
+      cashfreeEndpoint: endpoint,
+      cashfreeMode: getCashfreeMode(),
+      cashfreeApiVersion: CASHFREE_API_VERSION,
+      isValidCashfreeEndpoint: isValidCashfreeEndpoint(endpoint),
+      hasCashfreeClientId: Boolean(CASHFREE_CLIENT_ID),
+      hasCashfreeClientSecret: Boolean(CASHFREE_CLIENT_SECRET),
     });
   } catch (error) {
     next(error);
@@ -281,80 +159,87 @@ async function createPaymentRequest(req, res, next) {
       return next(new Error("Payment amount does not match order total"));
     }
 
+    const cashfreeOrderId = buildCashfreeOrderId(order.id);
     const payload = {
-      purpose,
-      amount: orderAmount.toFixed(2),
-      phone: normalizePhone(buyerPhone),
-      buyer_name: buyerName,
-      email: buyerEmail,
-      redirect_url: `${BACKEND_URL}/api/payments/verify`,
-      send_email: false,
-      send_sms: false,
-      allow_repeated_payments: false,
+      order_id: cashfreeOrderId,
+      order_amount: Number(orderAmount.toFixed(2)),
+      order_currency: "INR",
+      order_note: purpose,
+      customer_details: {
+        customer_id: `customer_${order.id}`,
+        customer_name: buyerName,
+        customer_email: buyerEmail,
+        customer_phone: normalizePhone(buyerPhone),
+      },
+      order_meta: {
+        return_url: `${BACKEND_URL}/api/payments/verify?order_id=${cashfreeOrderId}`,
+      },
+      order_tags: {
+        internal_order_id: String(order.id),
+        order_number: order.order_number,
+      },
     };
 
-    const response = await axios.post(
-      getCreatePaymentRequestUrl(),
-      toInstamojoPayload(payload),
-      {
-        headers: await getInstamojoHeaders(),
-      },
-    );
+    const response = await axios.post(`${getCashfreeEndpoint()}/orders`, payload, {
+      headers: getCashfreeHeaders(),
+    });
 
-    const paymentRequest = getPaymentRequestFromResponse(response.data);
-    const paymentUrl = getPaymentUrl(paymentRequest);
-    const paymentRequestId = getPaymentRequestId(paymentRequest);
-    if (!paymentRequestId || !paymentUrl) {
-      const error = new Error("Instamojo response did not include a payment link");
+    const cashfreeOrder = response.data;
+    if (!cashfreeOrder.order_id || !cashfreeOrder.payment_session_id) {
+      const error = new Error("Cashfree response did not include a payment session");
       error.statusCode = 502;
-      error.details = { gatewayResponse: response.data };
+      error.details = { gatewayResponse: cashfreeOrder };
       throw error;
     }
 
     await pool.query(
       "INSERT INTO payments (order_id, payment_id, payment_method, amount, status, response_json) VALUES (?, ?, ?, ?, ?, ?)",
       [
-        orderId,
-        paymentRequestId,
-        "instamojo",
+        order.id,
+        cashfreeOrder.order_id,
+        "cashfree",
         orderAmount,
         "pending",
-        JSON.stringify(paymentRequest),
+        JSON.stringify(cashfreeOrder),
       ],
     );
 
-    res.json({ paymentRequest, paymentUrl });
+    res.json({
+      gateway: "cashfree",
+      cashfreeMode: getCashfreeMode(),
+      paymentSessionId: cashfreeOrder.payment_session_id,
+      paymentRequest: cashfreeOrder,
+    });
   } catch (error) {
-    next(handleInstamojoError(error));
+    next(handleCashfreeError(error));
   }
 }
 
 async function verifyPayment(req, res, next) {
   try {
     assertPaymentConfig();
-    const { payment_request_id, payment_id } = req.query;
+    const cashfreeOrderId = req.query.order_id || req.query.orderId;
 
-    if (!payment_request_id || !payment_id) {
+    if (!cashfreeOrderId) {
       res.status(400);
-      return next(new Error("Missing payment verification values"));
+      return next(new Error("Missing Cashfree order id"));
     }
 
     const response = await axios.get(
-      getPaymentRequestUrl(payment_request_id),
+      `${getCashfreeEndpoint()}/orders/${cashfreeOrderId}`,
       {
-        headers: await getInstamojoHeaders(),
+        headers: getCashfreeHeaders(),
       },
     );
 
-    const paymentRequest = getPaymentRequestFromResponse(response.data);
-    const internalStatus =
-      ["Completed", "Credit", "paid", "success"].includes(paymentRequest.status)
-        ? "paid"
-        : "failed";
+    const cashfreeOrder = response.data;
+    const internalStatus = isPaidCashfreeOrder(cashfreeOrder.order_status)
+      ? "paid"
+      : "failed";
 
     const [payments] = await pool.query(
       "SELECT id, order_id FROM payments WHERE payment_id = ?",
-      [payment_request_id],
+      [cashfreeOrderId],
     );
 
     if (!payments.length) {
@@ -370,8 +255,13 @@ async function verifyPayment(req, res, next) {
     const orderNumber = orders[0]?.order_number;
 
     await pool.query(
-      "UPDATE payments SET status = ?, transaction_id = ? WHERE id = ?",
-      [internalStatus, payment_id, paymentRecord.id],
+      "UPDATE payments SET status = ?, transaction_id = ?, response_json = ? WHERE id = ?",
+      [
+        internalStatus,
+        cashfreeOrder.cf_order_id || cashfreeOrder.order_id,
+        JSON.stringify(cashfreeOrder),
+        paymentRecord.id,
+      ],
     );
     await pool.query(
       "UPDATE orders SET payment_status = ?, status = CASE WHEN ? = 'paid' THEN 'confirmed' ELSE status END WHERE id = ?",
@@ -386,11 +276,11 @@ async function verifyPayment(req, res, next) {
     if (orderNumber) {
       resultUrl.searchParams.set("orderNumber", orderNumber);
     }
-    resultUrl.searchParams.set("paymentRequestId", payment_request_id);
+    resultUrl.searchParams.set("paymentRequestId", cashfreeOrderId);
 
     res.redirect(resultUrl.toString());
   } catch (error) {
-    next(handleInstamojoError(error));
+    next(handleCashfreeError(error));
   }
 }
 
