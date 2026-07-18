@@ -15,8 +15,20 @@ async function startServer() {
     process.exit(1);
   }
 
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`Backend server running on http://localhost:${PORT}`);
+  });
+
+  server.on("error", (error) => {
+    if (error.code === "EADDRINUSE") {
+      console.error(
+        `Port ${PORT} is already in use. Stop the other backend process or set a different PORT in backend/.env.`,
+      );
+      process.exit(1);
+    }
+
+    console.error("Backend server failed:", error.message);
+    process.exit(1);
   });
 }
 
