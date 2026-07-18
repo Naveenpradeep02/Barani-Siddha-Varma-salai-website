@@ -9,12 +9,13 @@ const { errorHandler, notFound } = require("./middleware/errorMiddleware");
 const app = express();
 const isProduction = NODE_ENV === "production";
 const defaultDevOrigins = ["http://localhost:3000", "http://127.0.0.1:3000"];
+const defaultProductionOrigins = ["https://bnaranisiddha.netlify.app"];
 const allowedOrigins = Array.from(
   new Set(
     CORS_ORIGIN.split(",")
       .map((origin) => origin.trim())
       .filter(Boolean)
-      .concat(defaultDevOrigins),
+      .concat(defaultDevOrigins, defaultProductionOrigins),
   ),
 );
 
